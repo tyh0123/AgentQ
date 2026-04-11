@@ -1,0 +1,220 @@
+# See parameters in https://github.com/ECP-WarpX/artemis/pull/43
+
+################################
+####### GENERAL PARAMETERS ######
+#################################
+# max_step = 1000000
+max_step = 8000000
+
+
+
+
+amr.n_cell = n_cellx n_celly n_cellz
+amr.max_grid_size = max_grid_sizex max_grid_sizey max_grid_sizez
+amr.blocking_factor = blocking_factor
+amr.refine_grid_layout = 1  # if n_MPI > n_grids, the grids will be successively divided in half until n_MPI <= n_grids
+
+geometry.dims = 3
+geometry.prob_lo = prob_lox prob_loy prob_loz
+geometry.prob_hi = prob_hix prob_hiy prob_hiz
+
+amr.max_level = 0
+
+# use pec instead of pml overlaying current source so you don't get a reflection
+boundary.field_lo = pml pml pml
+boundary.field_hi = pml pml pml
+
+my_constants.offset_y = -1100.e-6
+
+#################################
+############ NUMERICS ###########
+#################################
+warpx.verbose = 1
+
+warpx.cfl = 0.8
+
+# vacuum or macroscopic
+algo.em_solver_medium = macroscopic
+
+# laxwendroff or backwardeuler
+algo.macroscopic_sigma_method = laxwendroff
+
+# macroscopic.sigma_function(x,y,z) = "sigma_0 + (sigma_si - sigma_0) * (z <= h_si)"
+# macroscopic.npy_k_index = 10
+macroscopic.sigma_function(x,y,z) = "sigma_0"
+macroscopic.sigma_npy_file = "single_qubit_validation_mask_no_jj.npy"
+macroscopic.sigma_npy_value = 1.e11
+macroscopic.mu_npy_file =  "single_qubit_validation_mask_no_jj.npy"
+macroscopic.npy_k_index = 20
+macroscopic.mu_npy_value = 1.25663707e-06
+algo.use_PEC_mask = 1
+
+
+macroscopic.epsilon_function(x,y,z) = "eps_0 + eps_0 * (eps_r_si - 1.) * (z <= h_si)"
+
+
+my_constants.mu_0 = 1.25663706212e-06
+my_constants.mu_1 = 0.00000003212e-06
+my_constants.mu_r_si = 1.0
+macroscopic.mu_function(x,y,z) = "mu_0"
+#macroscopic.mu_function(x,y,z) = "mu_0 - mu_1 * (x > 190.0e-6 + ddx) * (x < 221.0e-6 - ddx) * (y > 349.5e-6 - ddy) * (y < 350.5e-6 + ddy)"
+# macroscopic.mu_function(x,y,z) = "mu_0 + mu_0 * (mu_r_si - 1.) * (z <= h_si)"
+ 
+#################################
+############ FIELDS #############
+#################################
+
+###############
+# domain size
+# n_cellx/y/z and Lx/y/z are needed to calculate dx/dy/dz
+###############
+my_constants.n_cellx = 840
+my_constants.n_celly = 1000
+my_constants.n_cellz = 40
+
+my_constants.max_grid_sizex = 840
+my_constants.max_grid_sizey = 500
+my_constants.max_grid_sizez = 20
+my_constants.blocking_factor = 2
+
+my_constants.prob_lox = 0.
+my_constants.prob_loy = 0.
+my_constants.prob_loz = 0.
+
+my_constants.prob_hix = 840.e-6
+my_constants.prob_hiy = 1000.e-6
+my_constants.prob_hiz = 200.e-6
+
+my_constants.Lx = prob_hix - prob_lox
+my_constants.Ly = prob_hiy - prob_loy
+my_constants.Lz = prob_hiz - prob_loz
+
+###############
+# material properties
+###############
+my_constants.sigma_0 = 0.0
+my_constants.sigma_si = 0.
+my_constants.sigma_metal = 1.e11
+
+my_constants.eps_0 = 8.8541878128e-12
+my_constants.eps_r_si = 11.7
+
+my_constants.mu_0 = 1.25663706212e-06
+my_constants.mu_r_si = 1.0
+my_constants.mu_r_test = 0.9999
+
+###############
+# silicon and palladium cross section
+###############
+my_constants.h_si = 100.e-6
+
+###############
+# waveguide port parameters
+###############
+my_constants.h_port = 100.e-6
+my_constants.w_port = 200.e-6
+
+###############
+# derived quantities and fundamental constants - don't touch these
+###############
+
+my_constants.pi = 3.14159265358979
+
+my_constants.freq = 5.0e9
+my_constants.TP = 1./freq
+
+# grid spacing
+my_constants.dx = Lx / n_cellx
+my_constants.dy = Ly / n_celly
+my_constants.dz = Lz / n_cellz
+
+my_constants.ddx = dx/1.e6
+my_constants.ddy = dy/1.e6
+my_constants.ddz = dz/1.e6
+
+my_constants.flag_none = 0
+my_constants.flag_hs = 1
+my_constants.flag_ss = 2
+
+# # ####################################################
+# # ############ inductor to represent qubit ###########
+# # ####################################################
+# # ################ IMPORTANT ##############
+# # the inductor flag belongs to algo class
+algo.use_lumped_inductor = 1
+# #########################################
+
+# ######################################################################
+# ####### resistor and capacitor belongs to macroscopic class ##########
+# ################# inductor belongs to inductor class #################
+# ######################################################################
+inductor.inductor_x_function(x,y,z) = "0.692e-9 * (z > h_si - ddz) * (z < h_si + ddz)  * (x > 190.0e-6 + ddx) * (x < 221.0e-6 - ddx) * (y > 349.5e-6 - ddy) * (y < 350.5e-6 + ddy)"
+inductor.inductor_y_function(x,y,z) = "0."
+inductor.inductor_z_function(x,y,z) = "0."
+
+
+###############
+# excitation
+###############
+
+# warpx.E_excitation_on_grid_style = parse_E_excitation_grid_function
+
+# warpx.Ex_excitation_flag_function(x,y,z) = "flag_none"
+# warpx.Ey_excitation_flag_function(x,y,z) = "flag_ss * ( (y >= 470.e-6 + ddy) * (y < 475.e-6 - ddy) + (y >= 485e-6 + ddy) * (y <= 490e-6 - ddy)) * (z > h_si - ddz) * (z < h_si + ddz) * (x > 0.01e-6 - ddx) * (x < 0.01e-6 + ddx)"
+# warpx.Ez_excitation_flag_function(x,y,z) = "flag_none"
+
+
+# # This is a source on a qubit control line
+# warpx.Ex_excitation_grid_function(x,y,z,t) = "0."                                                                                                                                                                                                      
+# warpx.Ey_excitation_grid_function(x,y,z,t) = "exp(-(t-3*TP)**2/(2*TP**2))*sin(2*pi*freq*t) *
+#                                                       ( (y >= 470.e-6 + ddy) * (y < 475.e-6 - ddy) - (y >= 485e-6 + ddy) * (y <= 490e-6 - ddy)) * (z > h_si - ddz) * (z < h_si + ddz) * (x > 0.01e-6 - ddx) * (x < 0.01e-6 + ddx)"
+# warpx.Ez_excitation_grid_function(x,y,z,t) = "0."
+
+warpx.E_excitation_on_grid_style = parse_E_excitation_grid_function
+
+warpx.Ey_excitation_flag_function(x,y,z) = "flag_none"
+warpx.Ex_excitation_flag_function(x,y,z) = "flag_ss * ( (x >= 409.5e-6 + ddx) * (x < 415.5e-6 - ddx) + (x >= 427e-6 + ddx) * (x <= 432e-6 - ddx)) * (z >= h_si - ddz ) * (z <= h_si + ddz) * (y > 990.e-6 - ddy) * (y < 990.e-6 + ddy)"
+warpx.Ez_excitation_flag_function(x,y,z) = "flag_none"
+
+
+# This is a source on a qubit control line
+warpx.Ey_excitation_grid_function(x,y,z,t) = "0."                                                                                                                                                                                                      
+warpx.Ex_excitation_grid_function(x,y,z,t) = "exp(-(t-3*TP)**2/(2*TP**2))*sin(2*pi*freq*t) *
+                                                      ( (x >= 409.5e-6 + ddx) * (x < 415.5e-6 - ddx) - (x >= 427e-6 + ddx) * (x <= 432e-6 - ddx)) * (z >= h_si - ddz ) * (z <= h_si + ddz) * (y > 990.e-6 - ddy) * (y < 990.e-6 + ddy)"
+warpx.Ez_excitation_grid_function(x,y,z,t) = "0."
+
+
+###############
+# diagnostics
+###############
+
+diagnostics.diags_names = plt chk
+###############
+# full plotfiles
+#plt.intervals = 1000
+plt.intervals = 2000
+plt.fields_to_plot = Ex Ey Ez Bx By Bz mu sigma
+plt.diag_type = Full
+plt.file_min_digits = 7
+plt.diag_lo = 0. 0. 100.e-6
+plt.diag_hi = 839.5e-6 999.5e-6 102.e-6
+
+#warpx.reduced_diags_names = MyProbe1 MyProbe2
+
+#MyProbe1.type = RawEFieldReduction
+#MyProbe1.reduction_type = minimum
+#MyProbe1.integration_type = volume
+#MyProbe1.intervals = 1
+#MyProbe1.reduced_function(x,y,z) = (z > 101.e-6 - ddz) * (z < 101.e-6 + dz + ddz) * (x > 205.e-6 - ddx) * (x < 205.e-6 + dx + ddx) * (y > 350.e-6 - ddy) * (y < 350.e-6 + dy + ddy)
+
+#MyProbe2.type = RawEFieldReduction
+#MyProbe2.reduction_type = maximum
+#MyProbe2.integration_type = volume
+#MyProbe2.intervals = 1
+#MyProbe2.reduced_function(x,y,z) = (z > 101.e-6 - ddz) * (z < 101.e-6 + dz + ddz) * (x > 205.e-6 - ddx) * (x < 205.e-6 + dx + ddx) * (y > 350.e-6 - ddy) * (y < 350.e-6 + dy + ddy)
+
+# # checkpoint
+chk.intervals = 1000000
+chk.diag_type = Full
+chk.format = checkpoint
+chk.file_min_digits = 7
