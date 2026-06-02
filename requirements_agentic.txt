@@ -1,0 +1,31 @@
+# pip-only requirements for the agentic qubit-pipeline workflow.
+# If you prefer conda, use environment_agentic.yml instead — it pins the
+# heavy native deps (scipy, geopandas) through conda-forge which is more
+# robust on macOS/Linux.
+#
+# Install with:
+#     pip install -r requirements_agentic.txt
+
+# Scientific core
+numpy>=1.20             # tested 1.26.4
+pandas>=1.5             # tested 2.2.2
+scipy>=1.10             # tested 1.13.1
+matplotlib>=3.0         # tested 3.7.3
+scikit-image>=0.18      # tested 0.25.2
+PyYAML>=6.0             # tested 6.0.1
+tqdm>=4.60              # tested 4.66.4
+
+# GDS / layout
+gdspy>=1.6              # tested 1.6.13
+gdstk>=0.9              # tested 1.0.0
+geopandas>=0.13         # tested 1.1.2
+
+# Qubit design + database
+qiskit-metal>=0.5       # tested 0.5.3.post1
+SQuADDS>=0.4            # tested 0.4.3
+
+# Claude Code MCP server
+mcp                     # Anthropic Model Context Protocol Python SDK
+
+# Optional — only needed if you also run the postprocess/extract tools
+yt>=4.0                 # WarpX plotfile reader

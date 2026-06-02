@@ -1,0 +1,11 @@
+# Dependencies for the standalone GDS → mask → Artemis pipeline.
+# Install with:
+#     pip install -r requirements.txt
+#
+# Only mask_from_gds.py needs non-stdlib packages.
+# artemis_input_from_meta.py uses ONLY the Python stdlib (json, argparse).
+
+numpy>=1.20            # tested 1.26.4
+gdspy>=1.6             # tested 1.6.13   — GDS read/write
+scikit-image>=0.18     # tested 0.25.2   — polygon rasterization
+matplotlib>=3.0        # tested 3.7.3    — preview PNG

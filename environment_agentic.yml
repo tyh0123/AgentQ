@@ -1,0 +1,34 @@
+# Conda environment for the agentic qubit-pipeline workflow.
+#
+# Create with:
+#     conda env create -f environment_agentic.yml
+#     conda activate qubit-pipeline
+#
+# Tested versions (the working `mag_torch` env on macOS / Python 3.11) are
+# noted in comments — broader bounds are used in the spec so this also works
+# on other platforms.
+
+name: qubit-pipeline
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11           # tested 3.11.8
+  - numpy>=1.20           # tested 1.26.4
+  - pandas>=1.5           # tested 2.2.2
+  - scipy>=1.10           # tested 1.13.1
+  - matplotlib>=3.0       # tested 3.7.3
+  - scikit-image>=0.18    # tested 0.25.2
+  - geopandas>=0.13       # tested 1.1.2
+  - pyyaml>=6.0           # tested 6.0.1
+  - tqdm>=4.60            # tested 4.66.4   (extract.py progress bar)
+  - pip
+  - pip:
+      # Pure-Python pip-only packages
+      - gdspy>=1.6                # tested 1.6.13  — GDS write/read for qiskit-metal
+      - gdstk>=0.9                # tested 1.0.0   — faster GDS lib used by some helpers
+      - qiskit-metal>=0.5         # tested 0.5.3.post1
+      - SQuADDS>=0.4              # tested 0.4.3
+      - mcp                       # Anthropic Model Context Protocol SDK
+      # Optional — only needed if you also use the postprocessing tools
+      - yt>=4.0                   # WarpX plotfile reader (postprocess/extract.py)

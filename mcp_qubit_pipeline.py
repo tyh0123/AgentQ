@@ -67,6 +67,62 @@ def run_python(code: str, timeout: int = 300) -> str:
 async def list_tools() -> list[Tool]:
     return [
         Tool(
+            name="design_qubit",
+            description=(
+                "One-shot transmon design pipeline (single qubit + straight CPW feedline). "
+                "Runs SQuADDS query → qiskit-metal layout → GDS → npy mask → preview PNG → "
+                "sanity checks → Artemis FDTD input → SLURM submission script. "
+                "All parameters come from defaults.yaml; pass `overrides` for SQuADDS qubit "
+                "geometry tweaks and `config_overrides` for any other field via dotted path. "
+                "Returns paths to all generated files and the sanity-check report."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "qubit_frequency_GHz": {"type": "number"},
+                    "anharmonicity_MHz": {"type": "number"},
+                    "cavity_frequency_GHz": {"type": "number"},
+                    "g_MHz": {"type": "number"},
+                    "overrides": {
+                        "type": "object",
+                        "description": (
+                            "SQuADDS qubit geometry overrides applied after the query "
+                            '(string values). E.g. {"cross_length": "200um", "claw_length": "180um"}'
+                        ),
+                    },
+                    "config_overrides": {
+                        "type": "object",
+                        "description": (
+                            "Any defaults.yaml field via dotted path. "
+                            'E.g. {"artemis.max_step": 4000000, "slurm.wall_time": "20:00:00"}'
+                        ),
+                    },
+                    "prefix": {"type": "string", "description": "Output filename prefix (default: qubit_<freq>GHz)"},
+                    "skip_artemis_slurm": {
+                        "type": "boolean", "default": False,
+                        "description": "If true, skip Artemis input + SLURM generation (design only)",
+                    },
+                },
+                "required": ["qubit_frequency_GHz"],
+            },
+        ),
+        Tool(
+            name="generate_slurm",
+            description="Generate a Perlmutter SLURM job script for an existing Artemis input. Defaults from defaults.yaml slurm section.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "prefix": {"type": "string", "description": "Output prefix for SLURM script (perl_<prefix>.run)"},
+                    "input_file": {"type": "string", "description": "Artemis input filename (basename used in srun command)"},
+                    "config_overrides": {
+                        "type": "object",
+                        "description": 'Dotted-path overrides, e.g. {"slurm.wall_time": "20:00:00", "slurm.queue": "regular"}',
+                    },
+                },
+                "required": ["prefix", "input_file"],
+            },
+        ),
+        Tool(
             name="query_squadds",
             description="Query SQuADDS database for qubit design parameters. Supports single qubit (pass individual params) or multiple qubits (pass target_params_list). Returns cross dimensions, coupler params, CPW params, and Josephson inductance.",
             inputSchema={
@@ -201,6 +257,122 @@ async def list_tools() -> list[Tool]:
 @server.call_tool()
 async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
 
+    # ── 0. design_qubit (one-shot pipeline) ──
+    if name == "design_qubit":
+        cfg_overrides = dict(arguments.get("config_overrides") or {})
+        for k_arg, k_cfg in (
+            ("qubit_frequency_GHz", "target.qubit_frequency_GHz"),
+            ("anharmonicity_MHz", "target.anharmonicity_MHz"),
+            ("cavity_frequency_GHz", "target.cavity_frequency_GHz"),
+            ("g_MHz", "target.g_MHz"),
+        ):
+            if arguments.get(k_arg) is not None:
+                cfg_overrides[k_cfg] = arguments[k_arg]
+        overrides = arguments.get("overrides") or {}
+        prefix = arguments.get("prefix")
+        skip_artemis = bool(arguments.get("skip_artemis_slurm", False))
+
+        code = f"""
+import sys, json
+sys.path.insert(0, {repr(WORK_DIR)})
+from qpipe_config import Config, default_prefix
+import qpipe_squadds, qpipe_layout, qpipe_gds, qpipe_mask, qpipe_artemis, qpipe_slurm
+
+cfg = Config.load(overrides={json.dumps(cfg_overrides)})
+overrides = {json.dumps(overrides)}
+prefix = {json.dumps(prefix)} or default_prefix(cfg)
+skip_artemis = {skip_artemis}
+
+print(f"target: freq={{cfg.target.qubit_frequency_GHz}}GHz, anharm={{cfg.target.anharmonicity_MHz}}MHz, cavity={{cfg.target.cavity_frequency_GHz}}GHz, g={{cfg.target.g_MHz}}MHz")
+print(f"prefix: {{prefix}}")
+print()
+print("[1/6] SQuADDS query")
+dq, dk, Lj = qpipe_squadds.query(cfg, overrides=overrides)
+print(qpipe_squadds.summarize(dq, dk, Lj))
+
+print()
+print("[2/6] Build qiskit-metal layout")
+design = qpipe_layout.build(cfg, dq, dk, Lj)
+print(f"  components: {{list(design.components.keys())}}")
+
+print()
+print("[3/6] Export GDS")
+gds_file = f"{{prefix}}.gds"
+qpipe_gds.export(design, gds_file)
+print(f"  -> {{gds_file}}")
+
+print()
+print("[4/6] Rasterize mask + preview + metafile")
+res = qpipe_mask.rasterize(gds_file, prefix, cfg, dq, Lj)
+for k, v in res.files.items():
+    print(f"  -> {{v}}")
+jjc = res.meta['junction_location']['center']
+print(f"  JJ index ({{jjc['ix']}},{{jjc['iy']}}) -> ({{jjc['x_um']:.1f}}um, {{jjc['y_um']:.1f}}um)")
+print(f"  expected freq (C=80fF): {{res.meta['expected_qubit_freq_GHz']:.2f}} GHz")
+
+print()
+print("[4.5] Sanity checks")
+issues = qpipe_mask.sanity_check(res, cfg)
+if issues:
+    print(f"  {{len(issues)}} issue(s):")
+    for i in issues:
+        print(f"    ! {{i}}")
+else:
+    print("  all checks passed")
+
+if not skip_artemis:
+    print()
+    print("[5/6] Generate Artemis input")
+    input_file = f"input_{{prefix}}"
+    art = qpipe_artemis.write_input(res.meta, res.files['no_jj'], input_file, cfg)
+    print(f"  -> {{input_file}}")
+    print(f"  source y = {{art['source_y_um']:.0f}} um (auto from CPW)")
+    print(f"  Lj = {{art['Lj_nH']:.2f}} nH, grid {{art['grid']}}")
+
+    print()
+    print("[6/6] Generate SLURM script")
+    slurm_file = qpipe_slurm.write_slurm(prefix, input_file, cfg)
+    print(f"  -> {{slurm_file}}")
+
+summary = {{
+    "prefix": prefix,
+    "files": dict(res.files),
+    "junction_location": res.meta['junction_location'],
+    "expected_qubit_freq_GHz": res.meta['expected_qubit_freq_GHz'],
+    "design_params": res.meta['design_params'],
+    "sanity_issues": issues,
+}}
+if not skip_artemis:
+    summary['artemis_input'] = input_file
+    summary['slurm_script'] = slurm_file
+    summary['source_y_um'] = art['source_y_um']
+print()
+print("SUMMARY_JSON:" + json.dumps(summary))
+"""
+        result = run_python(code, timeout=180)
+        return [TextContent(type="text", text=result)]
+
+    # ── 0b. generate_slurm ──
+    elif name == "generate_slurm":
+        prefix = arguments["prefix"]
+        input_file = arguments["input_file"]
+        cfg_overrides = arguments.get("config_overrides") or {}
+
+        code = f"""
+import sys, json
+sys.path.insert(0, {repr(WORK_DIR)})
+from qpipe_config import Config
+import qpipe_slurm
+
+cfg = Config.load(overrides={json.dumps(cfg_overrides)})
+out = qpipe_slurm.write_slurm({json.dumps(prefix)}, {json.dumps(input_file)}, cfg)
+print(f"-> {{out}}")
+with open(out) as f:
+    print(f.read())
+"""
+        result = run_python(code, timeout=60)
+        return [TextContent(type="text", text=result)]
+
     # ── 1. query_squadds ──
     if name == "query_squadds":
         # Support single or multi-qubit query
@@ -271,13 +443,13 @@ print(f"\\nSaved {{len(target_list)}} design(s) to: {{outpath}}")
         output_prefix = arguments.get("output_prefix", "meander_only")
 
         if mode == "validation":
-            script = os.path.join(WORK_DIR, "pipelines", "single_qubit_validation.py")
+            script = os.path.join(WORK_DIR, "single_qubit_validation.py")
             cmd_list = [PYTHON, script]
         elif mode == "full":
-            script = os.path.join(WORK_DIR, "pipelines", "squadds_single_qubit.py")
+            script = os.path.join(WORK_DIR, "squadds_qmetal_test_together.py")
             cmd_list = [PYTHON, script]
         elif mode == "multi":
-            script = os.path.join(WORK_DIR, "pipelines", "multi_qubit_pipeline.py")
+            script = os.path.join(WORK_DIR, "multi_qubit_pipeline.py")
             cmd_list = [
                 PYTHON, script,
                 "--design-params", params_file,
@@ -287,7 +459,7 @@ print(f"\\nSaved {{len(target_list)}} design(s) to: {{outpath}}")
                 "--resolution", str(resolution),
             ]
         elif mode == "meander_only":
-            script = os.path.join(WORK_DIR, "pipelines", "meander_only_pipeline.py")
+            script = os.path.join(WORK_DIR, "meander_only_pipeline.py")
             cmd_list = [
                 PYTHON, script,
                 "--design-params", params_file,
@@ -511,197 +683,37 @@ print(f"\\nSaved: {{f_no}}, {{f_with}}, {{preview_path}}, {{meta_path}}")
         metafile = arguments["metafile"]
         output_file = arguments["output_file"]
         mask_npy = arguments["mask_npy"]
-        freq = arguments.get("freq_GHz", 5.0)
-        max_step = arguments.get("max_step", 2000000)
+        freq = arguments.get("freq_GHz", None)
+        max_step = arguments.get("max_step", None)
         use_inductor = arguments.get("use_inductor", True)
         source_y = arguments.get("source_y_um", None)
+        cfg_overrides = arguments.get("config_overrides") or {}
+        if max_step is not None:
+            cfg_overrides["artemis.max_step"] = max_step
 
         code = f"""
-import json
+import sys, json
+sys.path.insert(0, {repr(WORK_DIR)})
+from qpipe_config import Config
+import qpipe_artemis
 
 with open({repr(metafile)}) as f:
     meta = json.load(f)
-
-_mi = meta.get("mask_info", meta)
-nx = _mi["n_cellx"]
-ny = _mi["n_celly"]
-_res = _mi.get("resolution_um", meta.get("resolution_um", 1.0))
-jj = meta.get("junction_location", None)
-
-# Source y: default to 95% of domain height
-source_y_um = {source_y} if {source_y} is not None else ny * _res * 0.9
-
-if jj is not None:
-    # Qubit mode: use junction center for source CPW gap positions
-    jj_cx = jj["center"].get("x_um", nx//2)
-    jj_x_lo = jj["start"].get("x_um", jj_cx - 15)
-    jj_x_hi = jj["end"].get("x_um", jj_cx + 15)
-    jj_y_center = jj["center"].get("y_um", ny * 0.35)
-else:
-    # Meander-only mode: no junction, use feedline geometry for source
-    fw = float(meta.get("feedline_trace_width", "11.7um").replace("um", ""))
-    fg = float(meta.get("feedline_trace_gap", "5.1um").replace("um", ""))
-    jj_cx = nx * _res / 2.0  # feedline at center x
-    jj_x_lo = 0
-    jj_x_hi = 0
-    jj_y_center = 0
-
-if jj is not None:
-    # Qubit mode: rough CPW gap estimate from junction center
-    gap1_lo = jj_cx - 20
-    gap1_hi = jj_cx - 14
-    gap2_lo = jj_cx + 14
-    gap2_hi = jj_cx + 20
-else:
-    # Meander-only: compute gaps from feedline trace_width and gap
-    import numpy as _np
-    _mask = _np.load({repr(mask_npy)})
-    if _mask.ndim == 3:
-        _mask = _mask[:, :, 0]
-    # Find feedline center at source_y by scanning the mask row
-    _sy = int(source_y_um / _res)
-    if _sy >= _mask.shape[1]:
-        _sy = _mask.shape[1] - 1
-    _row = _mask[:, _sy]
-    # Find gap regions (0s flanked by 1s) near center
-    _cx = _mask.shape[0] // 2
-    _search = 100  # search ±100 cells around center
-    _lo = max(0, _cx - _search)
-    _hi = min(len(_row), _cx + _search)
-    _gaps = []
-    _in_gap = False
-    for _idx in range(_lo, _hi):
-        if _row[_idx] == 0 and not _in_gap:
-            _gap_start = _idx
-            _in_gap = True
-        elif _row[_idx] == 1 and _in_gap:
-            _gaps.append((_gap_start, _idx))
-            _in_gap = False
-    if len(_gaps) >= 2:
-        gap1_lo = _gaps[0][0] * _res
-        gap1_hi = _gaps[0][1] * _res
-        gap2_lo = _gaps[1][0] * _res
-        gap2_hi = _gaps[1][1] * _res
-    else:
-        # Fallback: estimate from dimensions
-        half_tw = fw / 2.0
-        gap1_lo = jj_cx - half_tw - fg
-        gap1_hi = jj_cx - half_tw
-        gap2_lo = jj_cx + half_tw
-        gap2_hi = jj_cx + half_tw + fg
-
-freq_hz = {freq} * 1e9
-Lj_H = meta.get("design_params", {{}}).get("Lj_nH", 10.0) * 1e-9
-
-inductor_section = ""
-if {use_inductor}:
-    inductor_section = f'''
-algo.use_lumped_inductor = 1
-inductor.inductor_x_function(x,y,z) = "{{Lj_H:.6e}} * (z > h_si - ddz) * (z < h_si + ddz) * (x > {{jj_x_lo}}e-6 + ddx) * (x < {{jj_x_hi}}e-6 - ddx) * (y > {{jj_y_center - 0.5}}e-6 - ddy) * (y < {{jj_y_center + 0.5}}e-6 + ddy)"
-inductor.inductor_y_function(x,y,z) = "0."
-inductor.inductor_z_function(x,y,z) = "0."
-'''
-
-template = f'''# Auto-generated Artemis input
-max_step = {max_step}
-
-amr.n_cell = n_cellx n_celly n_cellz
-amr.max_grid_size = max_grid_sizex max_grid_sizey max_grid_sizez
-amr.blocking_factor = blocking_factor
-amr.refine_grid_layout = 1
-geometry.dims = 3
-geometry.prob_lo = prob_lox prob_loy prob_loz
-geometry.prob_hi = prob_hix prob_hiy prob_hiz
-amr.max_level = 0
-boundary.field_lo = pml pml pml
-boundary.field_hi = pml pml pml
-
-warpx.verbose = 1
-warpx.cfl = 0.8
-algo.em_solver_medium = macroscopic
-algo.macroscopic_sigma_method = laxwendroff
-
-macroscopic.sigma_function(x,y,z) = "sigma_0"
-macroscopic.sigma_npy_file = "{mask_npy}"
-macroscopic.sigma_npy_value = 1.e11
-macroscopic.mu_npy_file = "{mask_npy}"
-macroscopic.npy_k_index = 20
-macroscopic.mu_npy_value = 1.25663707e-06
-algo.use_PEC_mask = 1
-macroscopic.epsilon_function(x,y,z) = "eps_0 + eps_0 * (eps_r_si - 1.) * (z <= h_si)"
-my_constants.mu_0 = 1.25663706212e-06
-macroscopic.mu_function(x,y,z) = "mu_0"
-
-my_constants.n_cellx = {{nx}}
-my_constants.n_celly = {{ny}}
-my_constants.n_cellz = 40
-my_constants.max_grid_sizex = {{nx}}
-my_constants.max_grid_sizey = {{ny // 2}}
-my_constants.max_grid_sizez = 20
-my_constants.blocking_factor = 2
-
-my_constants.prob_lox = 0.
-my_constants.prob_loy = 0.
-my_constants.prob_loz = 0.
-my_constants.prob_hix = {{nx}}.e-6
-my_constants.prob_hiy = {{ny}}.e-6
-my_constants.prob_hiz = 200.e-6
-
-my_constants.Lx = prob_hix - prob_lox
-my_constants.Ly = prob_hiy - prob_loy
-my_constants.Lz = prob_hiz - prob_loz
-
-my_constants.sigma_0 = 0.0
-my_constants.eps_0 = 8.8541878128e-12
-my_constants.eps_r_si = 11.7
-my_constants.mu_0 = 1.25663706212e-06
-my_constants.h_si = 100.e-6
-my_constants.pi = 3.14159265358979
-my_constants.freq = {{freq_hz:.1e}}
-my_constants.TP = 1./freq
-my_constants.dx = Lx / n_cellx
-my_constants.dy = Ly / n_celly
-my_constants.dz = Lz / n_cellz
-my_constants.ddx = dx/1.e6
-my_constants.ddy = dy/1.e6
-my_constants.ddz = dz/1.e6
-my_constants.flag_none = 0
-my_constants.flag_hs = 1
-my_constants.flag_ss = 2
-
-{{inductor_section}}
-
-warpx.E_excitation_on_grid_style = parse_E_excitation_grid_function
-warpx.Ey_excitation_flag_function(x,y,z) = "flag_none"
-warpx.Ex_excitation_flag_function(x,y,z) = "flag_ss * ( (x >= {{gap1_lo}}e-6 + ddx) * (x < {{gap1_hi}}e-6 - ddx) + (x >= {{gap2_lo}}e-6 + ddx) * (x <= {{gap2_hi}}e-6 - ddx)) * (z >= h_si - ddz) * (z <= h_si + ddz) * (y > {{source_y_um}}e-6 - ddy) * (y < {{source_y_um}}e-6 + ddy)"
-warpx.Ez_excitation_flag_function(x,y,z) = "flag_none"
-warpx.Ey_excitation_grid_function(x,y,z,t) = "0."
-warpx.Ex_excitation_grid_function(x,y,z,t) = "exp(-(t-3*TP)**2/(2*TP**2))*sin(2*pi*freq*t) * ( (x >= {{gap1_lo}}e-6 + ddx) * (x < {{gap1_hi}}e-6 - ddx) - (x >= {{gap2_lo}}e-6 + ddx) * (x <= {{gap2_hi}}e-6 - ddx)) * (z >= h_si - ddz) * (z <= h_si + ddz) * (y > {{source_y_um}}e-6 - ddy) * (y < {{source_y_um}}e-6 + ddy)"
-warpx.Ez_excitation_grid_function(x,y,z,t) = "0."
-
-diagnostics.diags_names = plt
-plt.intervals = 1000
-plt.fields_to_plot = Ex Ey Ez Bx By Bz mu sigma
-plt.diag_type = Full
-plt.file_min_digits = 7
-plt.diag_lo = 0. 0. 100.e-6
-plt.diag_hi = {{nx - 0.5}}e-6 {{ny - 0.5}}e-6 102.e-6
-'''
-
-with open({repr(output_file)}, "w") as f:
-    f.write(template)
-
-print(f"Artemis input written to: {repr(output_file)}")
-print(f"Grid: {{nx}} x {{ny}} x 40")
-print(f"Freq: {{freq_hz/1e9}} GHz")
-print(f"Source y: {{source_y_um}} um")
-print(f"Inductor: {{'enabled' if {use_inductor} else 'disabled'}}")
-if {use_inductor}:
-    print(f"  x range: {{jj_x_lo}} - {{jj_x_hi}} um")
-    print(f"  y center: {{jj_y_center}} um")
-    print(f"  Lj = {{Lj_H*1e9:.2f}} nH")
+cfg = Config.load(overrides={json.dumps(cfg_overrides)})
+art = qpipe_artemis.write_input(
+    meta, {repr(mask_npy)}, {repr(output_file)}, cfg,
+    freq_GHz={freq if freq is not None else 'None'},
+    source_y_um={source_y if source_y is not None else 'None'},
+    use_inductor={use_inductor},
+)
+print(f"Artemis input written: {{art['output_file']}}")
+print(f"  freq: {{art['freq_GHz']}} GHz")
+print(f"  source y: {{art['source_y_um']:.0f}} um")
+print(f"  grid: {{art['grid']}}")
+print(f"  Lj: {{art['Lj_nH']:.2f}} nH")
+print(f"  inductor: {{'enabled' if art['use_inductor'] else 'disabled'}}")
 """
-        result = run_python(code)
+        result = run_python(code, timeout=60)
         return [TextContent(type="text", text=result)]
 
     # ── 5. estimate_hpc_resources ──

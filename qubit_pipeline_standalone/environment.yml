@@ -1,0 +1,21 @@
+# Conda environment for the standalone GDS → mask → Artemis pipeline.
+#
+# Create with:
+#     conda env create -f environment.yml
+#     conda activate qubit-pipeline-standalone
+#
+# Note: gdspy is installed via pip — its conda-forge package is unmaintained
+# and tends to lag the pip release.
+
+name: qubit-pipeline-standalone
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python>=3.9
+  - numpy>=1.20
+  - scikit-image>=0.18
+  - matplotlib>=3.0
+  - pip
+  - pip:
+      - gdspy>=1.6
