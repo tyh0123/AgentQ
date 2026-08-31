@@ -1,0 +1,169 @@
+# Defaults for the qubit design pipeline.
+# Every field can be overridden via CLI flag or MCP tool arg.
+# Numbers are SI unless suffixed; strings with `um`/`mm`/`GHz` are qiskit-metal-style.
+
+# ──────────────────────────────────────────────
+#  Target qubit/cavity parameters (sent to SQuADDS)
+# ──────────────────────────────────────────────
+target:
+  qubit_frequency_GHz: 4.5
+  anharmonicity_MHz: -200
+  cavity_frequency_GHz: 7.0
+  g_MHz: 70                  # qubit-readout coupling strength
+
+# ──────────────────────────────────────────────
+#  SQuADDS query options
+# ──────────────────────────────────────────────
+squadds:
+  qubit_type: "TransmonCross"
+  cavity_type: "RouteMeander"
+  resonator_type: "quarter"
+  metric: "Euclidean"
+  num_top: 5                 # retry pool: search top-N matches, pick first with usable coupler
+  fallback_cpw:              # used when matched row has null coupler fields
+    second_width: "11.7um"
+    second_gap: "5.1um"
+  fallback_qubit_geometry:   # used by ML fallback (ML only predicts 3 fields)
+    cross_width: "30um"
+    cross_gap: "30um"
+    claw_width: "15um"
+    claw_gap: "5.1um"
+  ml_fallback:               # invoke remote ML model when DB nearest-neighbor is too far
+    enabled: true
+    freq_GHz_threshold: 0.1        # |row_freq - target_freq| > this → trigger ML
+    anharm_MHz_threshold: 10.0     # |row_anharm - target_anharm| > this → trigger ML
+    endpoint: "https://squadds-squadds-ml-inference-api.hf.space"
+    model_id: "transmon_cross_hamiltonian_inverse"
+    timeout_s: 30.0
+
+# ──────────────────────────────────────────────
+#  Layout placement (qiskit-metal)
+# ──────────────────────────────────────────────
+layout:
+  qubit_x_um: 0.0            # qubit center x (chip frame)
+  qubit_y_um: -200.0         # qubit center y (low enough to fit south arm, high enough to leave room for CPW above)
+  chip_x_um: 2000.0          # chip extent before trim
+  chip_y_um: 1100.0          # tighter — minimum that still fits cross + claw + room for CPW
+  cpw_end_y_offset_um: 750   # = chip_y_um/2 - qubit_y_um - cpw_termination_gap; positions CPW end at chip top
+  cpw_end_orientation: "90"  # OpenToGround orientation (90 = pin faces -y, CPW arrives from below)
+  cpw_termination_gap: "0um" # zero termination box (no horizontal line at chip top)
+  qubit_orientation: "-90"   # cross rotated 90° CCW, claw on +y arm
+  claw_cpw_length: "40um"
+  claw_cpw_width: "11.7um"
+  metal_layer: 1
+
+# ──────────────────────────────────────────────
+#  Junction (JjDolan bridge)
+# ──────────────────────────────────────────────
+junction:
+  jj_width: "0.188um"
+  bridge_layer: 20
+  jj_layer: 60
+  jj_pad_mm: 0.0005          # half-pad inset on each end of the bridge
+
+# ──────────────────────────────────────────────
+#  Mask rasterization
+# ──────────────────────────────────────────────
+mask:
+  resolution_um: 1.0         # mask cell size
+  target_nx: 840             # force final x-dim (center crop); set null to disable
+  pad_cut_um: 0              # no RF pad to trim (OpenToGround is tiny); CPW reaches mask top
+  trim_margin_um: 200        # padding around active region after autocrop
+  specs_no_jj:               # GDS layer/datatype pairs to rasterize as metal
+    - [1, 0]
+    - [1, 10]
+    - [1, 11]
+  specs_with_jj:
+    - [1, 0]
+    - [1, 10]
+    - [1, 11]
+    - [20, 10]               # JJ bridge layer
+    - [60, 10]               # JJ junction-window layer (jj_layer)
+  jj_gap_cells: 1            # carve a gap this many cells wide at the JJ center
+                             # (splits the bridge into two electrodes for the
+                             #  lumped Lj); 0 = disable (solid shorted bridge)
+
+# ──────────────────────────────────────────────
+#  Sanity check tolerances
+# ──────────────────────────────────────────────
+sanity:
+  jj_pos_tol_cells: 5        # allowed JJ center mismatch (bridge vs metafile)
+  cpw_top_gap_cells: 50      # CPW must reach within this many cells of mask top
+  asymmetry_threshold: 0.5   # cross y-symmetry around JJ center (0=perfect, 1=worst)
+  metal_fraction_min: 0.5
+  metal_fraction_max: 0.99
+
+# ──────────────────────────────────────────────
+#  DRC (Design Rule Check) — KLayout polygon engine
+#  Runs on the exported GDS after layout, before mask/Artemis.
+#  Layer convention: (1,0)=ground outline, (1,10)=etched/subtract,
+#  (1,11)=positive metal features, (20,10)/(60,10)=JJ bridge/window.
+# ──────────────────────────────────────────────
+drc:
+  enabled: true
+  fail_on_violation: false    # true → abort pipeline when DRC finds violations
+  write_marker_gds: true      # dump violation markers to <prefix>_drc_markers.gds
+  marker_layer: 1000          # GDS layer used for violation markers
+
+  # Modular rule list. Each entry: name (violation label), type, layers /
+  # layer_a+layer_b, threshold, optional enabled (default true).
+  # Types: width | spacing | area (min_um2) | separation | enclosing | overlap.
+  # Adding or retuning a rule is a YAML edit only — no code change.
+  rules:
+    - name: min_metal_width       # min width of positive metal features
+      type: width
+      layers: [[1, 11]]
+      min_um: 1.0
+    - name: min_area              # min metal polygon area (removes slivers)
+      type: area
+      layers: [[1, 11]]
+      min_um2: 4.0
+    - name: min_spacing           # min metal-to-metal spacing
+      type: spacing
+      layers: [[1, 11]]
+      min_um: 1.0
+    - name: min_gap               # min etched-channel width (width on gap layer)
+      type: width
+      layers: [[1, 10]]
+      min_um: 1.0
+    - name: jj_min_width          # disabled: a naive min-width check on the Dolan
+      type: width                 #   junction always fails (it is intentionally
+      layers: [[20, 10], [60, 10]]  # sub-lithographic, ~0.02um). Verify JJs with a
+      min_um: 0.04                #   dedicated e-beam rule deck; to opt in, set
+      enabled: false              #   enabled: true and tune to your e-beam floor.
+  # Cross-layer types (separation / enclosing / overlap) are supported but have
+  # no use on this single-metal-layer stack — they become relevant once a second
+  # patterning step exists (airbridges, bandage layer, flux lines).
+
+# ──────────────────────────────────────────────
+#  Artemis FDTD input
+# ──────────────────────────────────────────────
+artemis:
+  max_step: 8000000
+  n_cellz: 40                # z-dim of simulation grid
+  cfl: 0.8
+  pml_margin_um: 100         # source distance from PML on +y side
+  h_si_um: 100               # silicon substrate thickness
+  eps_r_si: 11.7             # silicon dielectric constant
+  prob_hiz_um: 200           # domain z extent
+  plt_intervals: 1000        # plotfile output cadence (steps)
+  diag_slice_z_um: [100, 102]   # diagnostic slice z range (just above Si)
+  npy_k_index: 20            # mu npy slab z-index
+  sigma_value: 1.0e+11       # metal conductivity (S/m)
+  cpw_source_widening_um: 0.5    # widen source x past each CPW gap by 0.5 um on each side
+  jj_gap_model: true         # true: use the with_jj mask (solid electrodes + 1-cell gap)
+                             #   and bridge the single gap cell with one lumped Lj.
+                             # false: use no_jj mask + Lj distributed over the full
+                             #   bridge footprint (legacy behavior).
+
+# ──────────────────────────────────────────────
+#  SLURM job submission (Perlmutter)
+# ──────────────────────────────────────────────
+slurm:
+  nodes: 4
+  gpus: 16
+  queue: "premium"
+  account: "m3766"
+  wall_time: "40:00:00"
+  binary: "./main3d.gnu.TPROF.MTMPI.CUDA.ex"
+  job_name_prefix: "q"

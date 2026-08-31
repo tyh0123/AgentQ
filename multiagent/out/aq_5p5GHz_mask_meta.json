@@ -1,0 +1,191 @@
+{
+  "target_params": {
+    "qubit_frequency_GHz": 5.5,
+    "anharmonicity_MHz": -200.0,
+    "cavity_frequency_GHz": 7.0,
+    "g_MHz": 70
+  },
+  "design_params": {
+    "cross_length_um": 200.0,
+    "cross_width_um": 30.0,
+    "cross_gap_um": 30.0,
+    "claw_length_um": 130.0,
+    "claw_width_um": 15.0,
+    "claw_gap_um": 5.1,
+    "ground_spacing_um": 5.0,
+    "Lj_nH": 7.4373351289758585
+  },
+  "mask_info": {
+    "mask_no_jj": "aq_5p5GHz_mask_no_jj.npy",
+    "mask_with_jj": "aq_5p5GHz_mask_with_jj.npy",
+    "preview_png": "aq_5p5GHz_mask_preview.png",
+    "specs_no_jj": [
+      [
+        1,
+        0
+      ],
+      [
+        1,
+        10
+      ],
+      [
+        1,
+        11
+      ]
+    ],
+    "specs_with_jj": [
+      [
+        1,
+        0
+      ],
+      [
+        1,
+        10
+      ],
+      [
+        1,
+        11
+      ],
+      [
+        20,
+        10
+      ],
+      [
+        60,
+        10
+      ]
+    ],
+    "n_cellx": 840,
+    "n_celly": 1100,
+    "n_cellz": 1,
+    "resolution_um": 1.0,
+    "prob_hix_m": 0.0008399999999999999,
+    "prob_hiy_m": 0.0010999999999999998
+  },
+  "junction_location": {
+    "start": {
+      "ix": 191,
+      "iy": 345,
+      "x_um": 191.0,
+      "y_um": 345.0
+    },
+    "end": {
+      "ix": 220,
+      "iy": 354,
+      "x_um": 220.0,
+      "y_um": 354.0
+    },
+    "center": {
+      "ix": 205,
+      "iy": 349,
+      "x_um": 205.0,
+      "y_um": 349.0
+    }
+  },
+  "mask_feature_locations": {
+    "layer_1_dt_0": {
+      "ix_range": [
+        0,
+        839
+      ],
+      "iy_range": [
+        0,
+        1098
+      ],
+      "x_range_um": [
+        0.0,
+        839.0
+      ],
+      "y_range_um": [
+        0.0,
+        1098.0
+      ],
+      "pixel_count": 827452
+    },
+    "layer_1_dt_10": {
+      "ix_range": [
+        221,
+        620
+      ],
+      "iy_range": [
+        150,
+        644
+      ],
+      "x_range_um": [
+        221.0,
+        620.0
+      ],
+      "y_range_um": [
+        150.0,
+        644.0
+      ],
+      "pixel_count": 29580
+    },
+    "layer_1_dt_11": {
+      "ix_range": [
+        415,
+        426
+      ],
+      "iy_range": [
+        645,
+        1098
+      ],
+      "x_range_um": [
+        415.0,
+        426.0
+      ],
+      "y_range_um": [
+        645.0,
+        1098.0
+      ],
+      "pixel_count": 5448
+    },
+    "layer_20_dt_10": {
+      "ix_range": [
+        185,
+        227
+      ],
+      "iy_range": [
+        345,
+        354
+      ],
+      "x_range_um": [
+        185.0,
+        227.0
+      ],
+      "y_range_um": [
+        345.0,
+        354.0
+      ],
+      "pixel_count": 203
+    },
+    "layer_60_dt_10": {
+      "ix_range": [
+        206,
+        206
+      ],
+      "iy_range": [
+        350,
+        350
+      ],
+      "x_range_um": [
+        206.0,
+        206.0
+      ],
+      "y_range_um": [
+        350.0,
+        350.0
+      ],
+      "pixel_count": 1
+    }
+  },
+  "cpw_source_gaps": {
+    "sample_y_um": 871.0,
+    "gap1_lo_um": 410.0,
+    "gap1_hi_um": 415.0,
+    "gap2_lo_um": 427.0,
+    "gap2_hi_um": 432.0
+  },
+  "expected_qubit_freq_GHz": 6.524788857550863,
+  "note": "expected_qubit_freq_GHz assumes C=80fF; actual C depends on geometry"
+}

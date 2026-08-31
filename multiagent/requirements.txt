@@ -1,0 +1,28 @@
+# AgentQ multi-agent — tested with Python 3.11.8 (conda env "mag_torch")
+# Install:  pip install -r requirements.txt
+numpy==1.26.4
+scipy==1.13.1
+pandas==2.2.2
+matplotlib==3.7.3
+PyYAML==6.0.1
+joblib==1.4.2
+scikit-image==0.25.2
+geopandas==1.1.2
+shapely==2.1.2
+
+# geometry / GDS
+gdspy==1.6.13
+gdstk==1.0.0
+klayout==0.30.9
+
+# quantum-chip layout + design DB
+qiskit-metal==0.5.3.post1
+SQuADDS==0.4.3
+PySide6==6.10.1        # Qt binding required by qiskit-metal (runs headless, see config.py)
+
+# inverse-design ML model
+torch==2.3.0
+
+# optional — LLM judgment backend for the critics; without it the demo
+# falls back to deterministic physics rules and still runs end-to-end
+# anthropic

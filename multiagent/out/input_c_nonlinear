@@ -1,0 +1,154 @@
+# ============================================================================
+# JJ STRONG DRIVE -- see the NONLINEARITY (Kerr frequency shift).
+# IDENTICAL to JJ_test_jj_smallsig (JJ, Ic=2.94e-8 -> L_J0=11.19nH, all-PEC, no R/C)
+# EXCEPT the drive amplitude is raised (E_amp=1 -> 100) to push phi up.
+#
+# NONLINEAR SIGNATURE (all-PEC = undamped tone, so NO chirp -- use the shift):
+#   small-signal (jj_smallsig, E_amp=1, phi~1e-3)  -> f = 4.116 GHz
+#   this run     (E_amp=100, phi ~ 0.x)            -> f LOWER by  delta_f/f ~ -phi^2/16
+#   the DOWNWARD frequency shift vs small-signal = Kerr / anharmonicity = the nonlinearity.
+#
+# *** SCAN E_amp ***  josephson_phi_x is plotted -> check phi_max:
+#   phi_max < 0.2  -> raise E_amp (short run: add  max_step=400000  on the cmd line)
+#   0.3 < phi_max < 0.7 -> good (weakly nonlinear, ~1-2% shift, still symmetric)
+#   phi_max > ~1.3 -> LOWER E_amp (switched -- overshoot, messy)
+# Fast scan without editing the file:
+#   srun ... ./main...ex input_c_nonlinear my_constants.E_amp=300 max_step=400000
+# (max_step=400000 ~ 0.75 ns = just past the pulse peak -> phi_max is already reached)
+#
+# NOTE: for a CHIRP (freq rising during a ring-down) you need LOSS -> add R
+#   (warpx.use_lumped_resistor=1) or PML boundaries; all-PEC alone gives only the shift.
+# ============================================================================
+max_step = 4000000
+
+amr.n_cell = n_cellx n_celly n_cellz
+amr.max_grid_size = max_grid_sizex max_grid_sizey max_grid_sizez
+amr.blocking_factor = blocking_factor
+amr.refine_grid_layout = 1
+geometry.dims = 3
+geometry.prob_lo = prob_lox prob_loy prob_loz
+geometry.prob_hi = prob_hix prob_hiy prob_hiz
+amr.max_level = 0
+boundary.field_lo = pml pml pec
+boundary.field_hi = pml pml pml
+
+warpx.verbose = 1
+warpx.cfl = 0.8
+algo.em_solver_medium = macroscopic
+algo.macroscopic_sigma_method = laxwendroff
+
+macroscopic.sigma_function(x,y,z) = "sigma_0"
+macroscopic.sigma_npy_file = "qubit_4p5GHz_mask_with_jj.npy"
+macroscopic.sigma_npy_value = 1.e11
+macroscopic.mu_npy_file = "qubit_4p5GHz_mask_with_jj.npy"
+macroscopic.npy_k_index = 20
+macroscopic.mu_npy_value = 1.25663707e-06
+algo.use_PEC_mask = 1
+macroscopic.epsilon_function(x,y,z) = "eps_0 + eps_0 * (eps_r_si - 1.) * (z <= h_si)"
+macroscopic.mu_function(x,y,z) = "mu_0"
+
+#################################
+############ FIELDS #############
+#################################
+my_constants.mu_1 = 0.00000003212e-06
+my_constants.n_cellx = 840
+my_constants.n_celly = 1000
+my_constants.n_cellz = 40
+my_constants.max_grid_sizex = 840
+my_constants.max_grid_sizey = 1000
+my_constants.max_grid_sizez = 40
+my_constants.blocking_factor = 2
+
+my_constants.prob_lox = 0.
+my_constants.prob_loy = 0.
+my_constants.prob_loz = 0.
+my_constants.prob_hix = 840.e-6
+my_constants.prob_hiy = 1000.e-6
+my_constants.prob_hiz = 200.e-6
+
+my_constants.Lx = prob_hix - prob_lox
+my_constants.Ly = prob_hiy - prob_loy
+my_constants.Lz = prob_hiz - prob_loz
+
+my_constants.sigma_0 = 0.0
+my_constants.eps_0 = 8.8541878128e-12
+my_constants.eps_r_si = 11.7
+my_constants.mu_0 = 1.25663706212e-06
+my_constants.h_si = 100.e-6
+my_constants.pi = 3.14159265358979
+my_constants.freq = 5.0e9
+my_constants.TP = 1./freq
+
+# grid spacing — 0.5 um in x/y, 5 um in z
+my_constants.dx = Lx / n_cellx
+my_constants.dy = Ly / n_celly
+my_constants.dz = Lz / n_cellz
+my_constants.ddx = dx/1.e6
+my_constants.ddy = dy/1.e6
+my_constants.ddz = dz/1.e6
+
+my_constants.flag_none = 0
+my_constants.flag_hs = 1
+my_constants.flag_ss = 2
+
+####################################################
+######### Josephson junction == 11.19 nH ###########
+####################################################
+algo.use_lumped_inductor = 0
+algo.use_josephson_junction = 1
+# Ic for L_J0 = hbar/(2e*Ic) = 11.19 nH  (same junction as jj_smallsig)
+my_constants.Ic_jj = 2.94e-8
+josephson.Ic_x_function(x,y,z) = "Ic_jj * (z > h_si - ddz) * (z < h_si + ddz) * (x > 194.5e-6 + ddx) * (x < 196.5e-6 - ddx) * (y > 350.0e-6 - ddy) * (y < 350.0e-6 + ddy)"
+josephson.Ic_y_function(x,y,z) = "0."
+josephson.Ic_z_function(x,y,z) = "0."
+
+my_constants.L_jj = 11.19e-9
+inductor.inductor_x_function(x,y,z) = "L_jj * (z > h_si - ddz) * (z < h_si + ddz) * (x > 194.5e-6 + ddx) * (x < 196.5e-6 - ddx) * (y > 350.0e-6 - ddy) * (y < 350.0e-6 + ddy)"
+inductor.inductor_y_function(x,y,z) = "0."
+inductor.inductor_z_function(x,y,z) = "0."
+
+# NO R, NO C -- pure Josephson element (all-PEC lossless)
+warpx.use_lumped_resistor  = 0
+warpx.use_lumped_capacitor = 0
+my_constants.R_jj = 1000
+my_constants.C_jj = 75.0e-15
+macroscopic.lumped_resistor_x_function(x,y,z) = "R_jj * (z > h_si - ddz) * (z < h_si + ddz) * (x > 194.5e-6 + ddx) * (x < 196.5e-6 - ddx) * (y > 349.5e-6 - ddy) * (y < 350.5e-6 + ddy)"
+macroscopic.lumped_resistor_y_function(x,y,z) = "0."
+macroscopic.lumped_resistor_z_function(x,y,z) = "0."
+macroscopic.lumped_capacitor_x_function(x,y,z) = "C_jj * (z > h_si - ddz) * (z < h_si + ddz) * (x > 194.5e-6 + ddx) * (x < 196.5e-6 - ddx) * (y > 349.5e-6 - ddy) * (y < 350.5e-6 + ddy)"
+macroscopic.lumped_capacitor_y_function(x,y,z) = "0."
+macroscopic.lumped_capacitor_z_function(x,y,z) = "0."
+
+###############
+# excitation — STRONG drive to push phi into the nonlinear regime. SCAN (header).
+###############
+my_constants.E_amp = 50
+warpx.E_excitation_on_grid_style = parse_E_excitation_grid_function
+warpx.Ey_excitation_flag_function(x,y,z) = "flag_none"
+warpx.Ex_excitation_flag_function(x,y,z) = "flag_ss * ( (x >= 409.5e-6 + ddx) * (x <= 415.5e-6 - ddx) + (x >= 426.5e-6 + ddx) * (x <= 432.5e-6 - ddx)) * (z >= h_si - ddz) * (z <= h_si + ddz) * (y > 900e-6 - ddy) * (y < 900e-6 + ddy)"
+warpx.Ez_excitation_flag_function(x,y,z) = "flag_none"
+warpx.Ey_excitation_grid_function(x,y,z,t) = "0."
+warpx.Ex_excitation_grid_function(x,y,z,t) = "E_amp * exp(-(t-3*TP)**2/(2*TP**2))*sin(2*pi*freq*t) * ( (x >= 409.5e-6 + ddx) * (x <= 415.5e-6 - ddx) - (x >= 426.5e-6 + ddx) * (x <= 432.5e-6 - ddx)) * (z >= h_si - ddz) * (z <= h_si + ddz) * (y > 900e-6 - ddy) * (y < 900e-6 + ddy)"
+warpx.Ez_excitation_grid_function(x,y,z,t) = "0."
+
+###############
+# diagnostics -- josephson_phi_x to read phi_max (nonlinear regime check)
+###############
+diagnostics.diags_names = plt chk
+
+plt.intervals = 2000
+plt.fields_to_plot = Ex Ey Ez Bx By Bz mu sigma josephson_phi_x josephson_Ic_x
+plt.diag_type = Full
+plt.file_min_digits = 7
+plt.diag_lo = 0. 0. 100.e-6
+plt.diag_hi = 839.5e-6 999.5e-6 102.e-6
+
+chk.intervals = 0300000
+chk.diag_type = Full
+chk.format = checkpoint
+chk.file_min_digits = 7
+
+warpx.reduced_diags_names = maxf
+maxf.type = FieldMaximum
+maxf.intervals = 500
+#amr.restart = diags/chk0900000
